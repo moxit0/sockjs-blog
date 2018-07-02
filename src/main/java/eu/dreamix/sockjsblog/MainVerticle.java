@@ -36,22 +36,27 @@ public class MainVerticle extends SyncVerticle {
     @Override
     @Suspendable
     public void start() {
-        HttpServer server = vertx.createHttpServer();
-        Router router = Router.router(vertx);
-        router.route().handler(CorsHandler.create("*"));
-        router.route().handler(BodyHandler.create());
-        router.get("/*").handler(StaticHandler.create("webroot").setCachingEnabled(false));
-        router.get("/testEB").handler(this::testEventBus);
+        final HttpServer server = vertx.createHttpServer();
+        final Router router = Router.router(vertx);
+        defineHttpEndpoints(router);
+
         SockJSHandlerOptions options = new SockJSHandlerOptions().setHeartbeatInterval(5000);
         SockJSHandler sockJSHandler = SockJSHandler.create(vertx, options);
         BridgeOptions bo = new BridgeOptions()
             .addInboundPermitted(new PermittedOptions().setAddress(EB_WS_SERVER_ADDRESS))
             .addOutboundPermitted(new PermittedOptions().setAddress(EB_WS_CLIENT_ADDRESS));
         sockJSHandler.bridge(bo, Sync.fiberHandler(this::handleEBrequests));
-        router.route("/ws/*").handler(sockJSHandler);
 
+        router.route("/ws/*").handler(sockJSHandler);
         vertx.eventBus().consumer(EB_WS_SERVER_ADDRESS, Sync.fiberHandler(this::handleClientMessage));
         server.requestHandler(router::accept).listen(9090);
+    }
+
+    private void defineHttpEndpoints(Router router) {
+        router.route().handler(CorsHandler.create("*"));
+        router.route().handler(BodyHandler.create());
+        router.get("/*").handler(StaticHandler.create("webroot").setCachingEnabled(false));
+        router.put("/sendMsgToClient").handler(this::sendMsgToClient);
     }
 
     @Suspendable
@@ -63,9 +68,13 @@ public class MainVerticle extends SyncVerticle {
     }
 
     @Suspendable
-    private void testEventBus(RoutingContext ctx) {
-        JsonObject message = new JsonObject();
-        message.put("msg", "Success");
+    private void sendMsgToClient(RoutingContext ctx) {
+        final JsonObject message;
+        if (ctx.getBody() != null && ctx.getBody().length() > 0) {
+            message = ctx.getBodyAsJson();
+        } else {
+            message = new JsonObject().put("msg", "Success");
+        }
         vertx.eventBus().publish(EB_WS_CLIENT_ADDRESS, message.encode());
         ctx.response().setStatusCode(HttpResponseStatus.OK.code())
             .putHeader(HttpHeaderNames.CONTENT_TYPE, HttpHeaderValues.APPLICATION_JSON)
