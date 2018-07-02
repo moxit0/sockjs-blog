@@ -10,6 +10,7 @@ import io.vertx.core.http.*;
 import io.vertx.core.json.JsonObject;
 import io.vertx.core.logging.Logger;
 import io.vertx.core.logging.LoggerFactory;
+import io.vertx.ext.bridge.BridgeEventType;
 import io.vertx.ext.bridge.PermittedOptions;
 import io.vertx.ext.sync.Sync;
 import io.vertx.ext.sync.SyncVerticle;
@@ -31,20 +32,16 @@ public class MainVerticle extends SyncVerticle {
 
     private static final String EB_WS_CLIENT_ADDRESS = "ws-to-client";
     private static final String EB_WS_SERVER_ADDRESS = "ws-to-server";
-    private WebClient webClient;
 
     @Override
     @Suspendable
     public void start() {
-        webClient = WebClient.create(vertx, new WebClientOptions().setSsl(true));
         HttpServer server = vertx.createHttpServer();
         Router router = Router.router(vertx);
         router.route().handler(CorsHandler.create("*"));
         router.route().handler(BodyHandler.create());
         router.get("/*").handler(StaticHandler.create("webroot").setCachingEnabled(false));
-        router.get("/google").handler(Sync.fiberHandler(this::getGoogleContent));
         router.get("/testEB").handler(this::testEventBus);
-//        vertx.createHttpServer().requestHandler(Sync.fiberHandler(this::getGoogleContent)).listen(8080);
         SockJSHandlerOptions options = new SockJSHandlerOptions().setHeartbeatInterval(5000);
         SockJSHandler sockJSHandler = SockJSHandler.create(vertx, options);
         BridgeOptions bo = new BridgeOptions()
@@ -59,17 +56,10 @@ public class MainVerticle extends SyncVerticle {
 
     @Suspendable
     private void handleEBrequests(BridgeEvent event) {
-//        logger.info("A websocket event occurred: {0}, rawMessage: {1}", event.type(), event.getRawMessage());
+        if (event.type() == BridgeEventType.PUBLISH || event.type() == BridgeEventType.SEND) {
+            logger.info("A websocket event occurred: {0}, rawMessage: {1}", event.type(), event.getRawMessage());
+        }
         event.complete(true);
-    }
-
-    @Suspendable
-    private void getGoogleContent(RoutingContext serverRequest) {
-        final HttpResponse<Buffer> response = Sync.awaitResult(h -> webClient.getAbs("https://www.google.com").send(h));
-        final String responseContent = response.bodyAsString("UTF-8");
-        serverRequest.response()
-            .putHeader(HttpHeaderNames.CONTENT_TYPE, "text/html")
-            .end(responseContent);
     }
 
     @Suspendable
@@ -82,7 +72,7 @@ public class MainVerticle extends SyncVerticle {
             .end(message.toString());
     }
 
-    private void handleClientMessage(Message message){
+    private void handleClientMessage(Message message) {
         logger.info("A message received: {0}", message.body());
     }
 }
